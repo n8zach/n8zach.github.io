@@ -1,0 +1,267 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="user-scalable=no">
+
+    <title>Ready Pedal Speedometer</title>
+    <script type="text/javascript" src="gauge.js"></script>
+    <script type="text/javascript" src="cordova.js"></script>
+
+    <style>
+        body {background: rgb(80%, 80%, 80%); font-family: Arial; margin: 0; padding: 0;}
+        #xyAxis {position: absolute; width: 100%; height: 100%;}
+        #wrapper {text-align: center; width: 100%; height: 600px; color: "Black"; position: absolute; top:0; bottom: 0;left: 0;right: 0; margin: auto; text-shadow: 0px 0px 4px #000;}
+        #wrapper numbers {display: block; font-size: 100pt; }
+    </style>
+</head>
+
+<body>
+
+    <div id="wrapper">
+        <canvas width="4000" height="1000" id="speedometer" style="width: 100%; height: 100%;"></canvas>
+        <numbers id="xyz"></numbers>
+    </div>
+
+
+<script>(function() {
+
+// Gauge
+
+var opts = {
+  angle: -0.10, // The span of the gauge arc
+  lineWidth: 0.3, // The line thickness
+  radiusScale: 1, // Relative radius
+  pointer: {
+    length: 0.55, // // Relative to gauge radius
+    strokeWidth: 0.035, // The thickness
+    color: '#000000' // Fill color
+  },
+  limitMax: true,     // If false, max value increases automatically if value > maxValue
+  limitMin: true,     // If true, the min value of the gauge will be fixed
+  colorStart: '#e39944',   // Colors
+  colorStop: '#e39944',    // just experiment with them
+  strokeColor: '#FFFFFF',  // to see which ones work best for you
+  generateGradient: true,
+  highDpiSupport: true,     // High resolution support
+  // renderTicks is Optional
+  renderTicks: {
+    divisions: 5,
+    divWidth: 1.3,
+    divLength: 0.7,
+    divColor: '#333333',
+    subDivisions: 5,
+    subLength: 0.5,
+    subWidth: 1.2,
+    subColor: '#666666'
+  },
+staticLabels: {
+  font: "50px sans-serif",  // Specifies font
+  labels: [0, 5, 10, 15, 20, 25],  // Print labels at these values
+  color: "#000000",  // Optional: Label text color
+  fractionDigits: 0  // Optional: Numerical precision. 0=round off.
+ },
+  
+};
+
+var target = document.getElementById('speedometer'); // your canvas element
+var gauge = new Gauge(target).setOptions(opts); // create sexy gauge!
+gauge.maxValue = 25; // set max gauge value
+gauge.setMinValue(0);  // Prefer setter over gauge.minValue = 0
+gauge.animationSpeed = 64; // set animation speed (32 is default value)
+gauge.set(5); // set actual value
+
+
+// Initialise vars _____________________________________________
+
+var uT = document.getElementById('uT');
+var xyz = document.getElementById('xyz');
+var xyAxis = document.getElementById('xyAxis');
+var lastReading = {x: 0, y: 0, z: 0, magnitude: 0};
+var watchID = 0;
+var intervalID = 0;
+var lastAverage = 0;
+var lastReadings = [];
+var readingCount = 5;
+var lastSlope = 0;
+var lastPeakTime = new Date();
+var peakThreshold = 45;
+var peakToPeakTime = 0;
+
+var upThreshold = 45;
+var downThreshold = 40;
+var upThresholdCrossed = false;
+
+var rpm = 0;
+var rpms = [0,0,0,0,0];
+var rpmIndex = 0;
+var averageRPM = 0;
+var RPMCountForAverage = 5;
+
+var rotationsPerMile = 234;
+
+
+
+// Helper functions __________________________________________
+
+function displayReadings() {
+    // DISPLAY NUMBERS
+    
+    // Gauge
+    gauge.set(averageRPM * 60 / rotationsPerMile);
+    xyz.innerText = gauge.value.toFixed(0) + " MPH"; //lastSlope.toFixed(2);
+}
+
+// Magnetometer Actions __________________________________________
+
+function watchMagnetometer() {
+    console.log('watchMagnetometer()');
+    if (window.cordova && cordova.plugins && cordova.plugins.magnetometer) {
+        cordova.plugins.magnetometer.watchReadings(
+            function success (reading) {
+
+                // COLLECT READINGS
+                lastReading = {
+                    x: Math.round(reading.x),
+                    y: Math.round(reading.y),
+                    z: Math.round(reading.z),
+                    magnitude: reading.magnitude
+                };
+                //console.log(reading.magnitude);
+                
+                //lastReadings.push(Math.round(reading.magnitude));
+                //if (lastReadings.length > readingCount) {
+                //    lastReadings.shift();
+                //};
+                
+                //lastAverage = lastReadings.reduce((a, b) => (a + b)) / readingCount;
+                //slope = findSlope(lastReadings);
+                // detection won't work if it happens to be exactly 0;
+                //if (slope == 0) {
+                //    slope == lastSlope;
+                //}
+                //console.log(slope, reading.y, reading.magnitude);
+
+                //is a peak?
+                //if (reading.magnitude > peakThreshold && slope * lastSlope < 0) {
+                //    //navigator.vibrate(.1);
+                //   peakTime = new Date();
+                //    peakToPeakTime = peakTime - lastPeakTime;
+                //    //console.log(peakToPeakTime);
+                //    lastPeakTime = peakTime;
+                //    //console.log("BEEP");
+                //}
+
+                y = Math.abs(reading.y);
+                //console.log(y);
+                //heading up?
+                if (upThresholdCrossed == false && y > upThreshold) {
+                    upThresholdCrossed = true;
+                }
+                
+                now = new Date();
+                //heading down after peak?
+                if (upThresholdCrossed == true && y < downThreshold) {
+                    peakTime = now;
+                    peakToPeakTime = peakTime - lastPeakTime;
+                    lastPeakTime = peakTime;
+                    //console.log(peakToPeakTime, "BEEP");
+                    upThresholdCrossed = false;
+                    rpm = 30000/peakToPeakTime;
+                    //rpms.push(30000/peakToPeakTime);
+                    rpms[rpmIndex] = rpm;
+                    rpmIndex++;
+                }
+
+                if (now - lastPeakTime > 1000 ) {
+                    rpm = 0;
+                    rpms[rpmIndex] = 0;
+                    rpmIndex++;
+                    //rpms.push(0);
+                }
+                
+                if ( rpmIndex > RPMCountForAverage - 1 ) {
+                    rpmIndex = 0;
+                }
+                
+                //console.log( rpms.length);
+                averageRPM = rpms.reduce((a, b) => (a + b)) / RPMCountForAverage;
+            },
+                                                   
+            function error (err) {
+                console.log(err);
+            }
+        );
+        // Refresh display every 0.5 secs.
+        intervalID = window.setInterval(displayReadings, 500);
+    } else {
+        console.log('No magnetometer plugin!!');
+        console.log('cordova = ' + !!window.cordova);
+        console.log('cordova.plugins = ' + !!cordova.plugins);
+        console.log('cordova.plugins.magnetometer = ' + !!cordova.plugins.magnetometer);
+    }
+}
+
+function stop() {
+    console.log('stop()');
+    window.clearInterval(intervalID);
+    if (window.cordova && cordova.plugins && cordova.plugins.magnetometer)
+        cordova.plugins.magnetometer.stop();
+}
+
+function findSlope(values_y) {
+        var x_sum = 0;
+        var y_sum = 0;
+        var xy_sum = 0;
+        var xx_sum = 0;
+        var count = 0;
+
+        /*
+         * The above is just for quick access, makes the program faster
+         */
+        var x = 0;
+        var y = 0;
+        
+        var values_length = values_y.length;
+
+        /*
+         * Above and below cover edge cases
+         */
+        if (values_length === 0) {
+            return 0;
+        }
+
+        /*
+         * Calculate the sum for each of the parts necessary.
+         */
+
+        for (let i = 0; i< values_length; i++) {
+            x = i;
+            y = values_y[i];
+            x_sum+= x;
+            y_sum+= y;
+            xx_sum += x*x;
+            xy_sum += x*y;
+            count++;
+        }
+
+        /*
+         * Calculate m and b for the line equation:
+         * y = x * m + b
+         */
+        var m = (count*xy_sum - x_sum*y_sum) / (count*xx_sum - x_sum*x_sum);
+        return m;
+}
+                                                         
+// Device Event Listeners ___________________________________
+
+document.addEventListener("pause", stop, false);
+document.addEventListener("resume", watchMagnetometer, false);
+document.addEventListener("deviceready", watchMagnetometer, false)
+
+
+})();</script>
+  
+</body>
+</html>

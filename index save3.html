@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="user-scalable=no">
+
+    <title>Ready Pedal Speedometer</title>
+    <script type="text/javascript" src="gauge.js"></script>
+    <script type="text/javascript" src="cordova.js"></script>
+
+    <style>
+        body {background: black; display: inline; background black; font-family: Arial; margin: 0; padding: 0;}
+
+        #wrapper {color: white; background: black; text-align: center; width: 100%; height: 600px; position: absolute; top:0; bottom: 10;left: 0;right: 0; margin: auto;}
+        #wrapper dist {font-size: 80pt; margin-right: 20px}
+        #wrapper button {font-size: 40pt; }
+        #wrapper numbers {display: block; font-size: 100pt; }
+        #wrapper help {color: white; font-size: 45pt; }
+        #wrapper logo {display: block; color: orange; font-family: Arial; font-style: bolder; font-size: 80pt; }
+        #wrapper canvas {width: 100%; height: 100%;}
+        
+        #progress { width: 100%; background-color: grey; }
+        #progressBar { width: 1%; height: 30px; background-color: green; }
+    </style>
+</head>
+
+<body>
+    <div id="wrapper">
+        <logo>READY PEDAL</logo>
+        <br>
+        <br>
+        <br>
+        <dist id="time"></dist>
+<!--        <button id="resetTime" onclick="onTimeReset()" >reset</button>-->
+        <br>
+        <br>
+        <dist id="dist"></dist>
+<!--        <button id="resetDist" onclick="onDistReset()" >reset</button>-->
+        <br>
+        <br>
+        <dist id="calories"></dist>
+<!--        <button id="resetCals" onclick="onCalReset()" >reset</button>-->
+        <br>
+        <br>
+        <canvas id="speedometer"></canvas>
+        <numbers id="speed"></numbers>
+        <div id="progressBar"></div>
+        <help id="help">hello</help>
+        <br>
+        <br>
+        <button id="resetAll" onclick="onResetAll()" >reset</button>
+    </div>
+
+<script>
+    
+var opts= {
+  angle: -0.10, // The span of the gauge arc
+  lineWidth: 0.3, // The line thickness
+  radiusScale: 1, // Relative radius
+  pointer: {
+    length: 0.55, // // Relative to gauge radius
+    strokeWidth: 0.035, // The thickness
+    color: 'Orange' // Fill color
+  },
+  limitMax: true,     // If false, max value increases automatically if value > maxValue
+  limitMin: true,     // If true, the min value of the gauge will be fixed
+  colorStart: '#e39944',   // Colors
+  colorStop: '#e39944',    // just experiment with them
+  strokeColor: '#FFFFFF',  // to see which ones work best for you
+  generateGradient: true,
+  highDpiSupport: true,     // High resolution support
+  // renderTicks is Optional
+  renderTicks: {
+    divisions: 5,
+    divWidth: 1.3,
+    divLength: 0.7,
+    divColor: '#333333',
+    subDivisions: 5,
+    subLength: 0.5,
+    subWidth: 1.2,
+    subColor: '#666666'
+  },
+staticLabels: {
+  font: "50px sans-serif",  // Specifies font
+  labels: [0, 5, 10, 15, 20, 25],  // Print labels at these values
+  color: "White",  // Optional: Label text color
+  fractionDigits: 0  // Optional: Numerical precision. 0=round off.
+ },
+  
+};
+
+
+var target = document.getElementById('speedometer'); // your canvas element
+var gauge = new Gauge(target).setOptions(opts); // create sexy gauge!
+gauge.maxValue = 25; // set max gauge value
+gauge.setMinValue(0);  // Prefer setter over gauge.minValue = 0
+gauge.animationSpeed = 64; // set animation speed (32 is default value)
+gauge.set(5); // set actual value
+
+// Initialise vars _____________________________________________
+
+var dist = document.getElementById('dist');
+var cals = document.getElementById('calories');
+var speed = document.getElementById('speed');
+var help = document.getElementById('help');
+var speedometer = document.getElementById('speedometer');
+<!--var resetTime = document.getElementById('resetTime');-->
+<!--var resetDist = document.getElementById('resetDist');-->
+<!--var resetCals = document.getElementById('resetCals');-->
+var progressBar = document.getElementById('progressBar');
+
+dist.style.visibility = "hidden";
+cals.style.visibility = "hidden";
+time.style.visibility = "hidden";
+speedometer.style.visibility = "hidden";
+<!--resetTime.style.visibility = "hidden";-->
+<!--resetDist.style.visibility = "hidden";-->
+<!--resetCals.style.visibility = "hidden";-->
+
+var lastReading = {x: 0, y: 0, z: 0, magnitude: 0};
+var watchID = 0;
+var intervalID = 0;
+var lastAverage = 0;
+var lastReadings = [];
+var readingCount = 5;
+var lastSlope = 0;
+var lastPeakTime = new Date();
+var peakThreshold = 45;
+var peakToPeakTime = 0;
+
+var upThreshold = 0;
+var downThreshold = 0;
+var upThresholdCrossed = false;
+
+var rpm = 0;
+var rpms = [0,0,0,0];
+var rpmIndex = 0;
+var averageRPM = 0;
+var RPMCountForAverage = 4;
+
+var rotationsPerMile = 280;
+
+var movingThreshold = 2;
+var isCalibrated = false;
+var calibratedHigh = 0;
+var calibratedLow = 1000;
+var calibrationReadingsNeeded = 200;
+var calibarationCount = 0;
+
+var distance = 0;
+var lastMagTime = new Date();
+
+var weight = 160 / 2.205; //kg
+var calories = 0;
+
+var elapsedTime = 0;
+
+// Callback
+function onTimeReset() {
+    elapsedTime = 0;
+}
+
+function onDistReset() {
+    distance = 0;
+}
+
+function onCalReset() {
+    calories = 0;
+}
+
+function onResetAll() {
+    elapsedTime = 0;
+    distance = 0;
+    calories = 0;
+}
+
+// Helper functions __________________________________________
+function rpmToMPH(rpm) {
+    return rpm * 60 / rotationsPerMile;
+}
+
+function caloriesFromMinutesAndMPH(minutes, mph) {
+    return minutes * mphToCaloriesPerMinute(mph);
+}
+
+function mphToCaloriesPerMinute(mph) {
+    kcals = 3.5 * weight * mphToMETs(mph) / 200;
+    return kcals * .9; //stationary bike
+}
+
+function mphToMETs(mph) {
+    return Math.max(.88 * mph - 2.2, 0);
+}
+
+function displayReadings() {
+    time.innerText = "Time: " + new Date(elapsedTime).toISOString().substr(11, 8);
+    dist.innerText = distance.toFixed(2) + " mi";
+    cals.innerText = calories.toFixed(1) + " cal"; //Math.trunc(calories) + " Calories"; //.trunc();
+    
+    if(isCalibrated == true) {
+        progressBar.style.display = "none";
+        dist.style.visibility = "visible";
+        cals.style.visibility = "visible";
+        time.style.visibility = "visible";
+        speedometer.style.visibility = "visible";
+<!--        resetTime.style.visibility = "visible";-->
+<!--        resetDist.style.visibility = "visible";-->
+<!--        resetCals.style.visibility = "visible";-->
+        resetAll.style.visibility = "visible";
+        gauge.set(mph);
+        speed.innerText = Math.trunc(gauge.value) + " MPH";
+        help.innerText = "";
+        //reset.style.display = "block";
+    }
+    else {
+        dist.style.visibility = "hidden";
+        cals.style.visibility = "hidden";
+        time.style.visibility = "hidden";
+<!--        resetTime.style.visibility = "hidden";-->
+<!--        resetDist.style.visibility = "hidden";-->
+<!--        resetCals.style.visibility = "hidden";-->
+        resetAll.style.visibility = "hidden";
+        progressBar.style.visibity = "hidden";
+        speed.innerText = "Calibrating...";
+        if(calibratedHigh - calibratedLow > movingThreshold) {
+            help.innerText = "(Keep pedalling)";
+            progress = calibarationCount/calibrationReadingsNeeded * 100;
+            console.log(progress.toFixed(0));
+            progressBar.style.width = progress.toFixed(0) + "%";
+        }
+        else {
+            help.innerText = "Start pedaling\rat a comfortable speed.";
+        }
+    }
+}
+
+// Magnetometer Actions __________________________________________
+
+function watchMagnetometer() {
+    console.log('watchMagnetometer()');
+    if (window.cordova && cordova.plugins && cordova.plugins.magnetometer) {
+        cordova.plugins.magnetometer.watchReadings(
+            function success (reading) {
+
+                // COLLECT READINGS
+                //lastReading = {
+                //    x: Math.round(reading.x),
+                //    y: Math.round(reading.y),
+                //    z: Math.round(reading.z),
+                //    magnitude: reading.magnitude
+                //};
+                
+                now = new Date();
+                y = Math.abs(reading.y);
+                //console.log(y);
+
+                if (isCalibrated == false) {
+                    if (y > calibratedHigh) {
+                        calibratedHigh = y;
+                    }
+                    if (y < calibratedLow) {
+                        calibratedLow = y;
+                    }
+                    if(calibratedHigh - calibratedLow > movingThreshold) {
+                        calibarationCount++;
+                        if (calibarationCount > calibrationReadingsNeeded) {
+                            isCalibrated = true;
+                            calibaration = 0;
+                            console.log(calibratedLow, calibratedHigh);
+                            upThreshold = .9 * calibratedHigh;
+                            downThreshold = .7 * calibratedHigh;
+                        }
+                    }
+                    return;
+                }
+                                
+                //heading up?
+                if (upThresholdCrossed == false && y > upThreshold) {
+                    upThresholdCrossed = true;
+                }
+                
+                //heading down after peak?
+                if (upThresholdCrossed == true && y < downThreshold) {
+                    peakTime = now;
+                    peakToPeakTime = peakTime - lastPeakTime;
+                    lastPeakTime = peakTime;
+                    //console.log(peakToPeakTime, "BEEP");
+                    upThresholdCrossed = false;
+                    rpm = 30000/peakToPeakTime;
+                    //rpms.push(30000/peakToPeakTime);
+                    rpms[rpmIndex] = rpm;
+                    rpmIndex++;
+                }
+
+                if (now - lastPeakTime > 1000 ) {
+                    rpm = 0;
+                    rpms[rpmIndex] = 0;
+                    rpmIndex++;
+                    //rpms.push(0);
+                }
+                else
+                {
+                    if(isCalibrated) {
+                        elapsedTime += deltaTime;
+                    }
+                }
+                
+                if ( rpmIndex > RPMCountForAverage - 1 ) {
+                    rpmIndex = 0;
+                }
+                
+                //console.log( rpms.length);
+                averageRPM = rpms.reduce((a, b) => (a + b)) / RPMCountForAverage;
+                
+                mph = rpmToMPH(averageRPM);
+                
+                deltaTime = now - lastMagTime;
+                minutes = deltaTime / 1000 / 60;
+                //console.log(deltaTime);
+                lastMagTime = now;
+                
+                distance += minutes / 60 * mph;
+                
+                calories += caloriesFromMinutesAndMPH(minutes, mph);
+                
+                
+            },
+                                                   
+            function error (err) {
+                console.log(err);
+            }
+        );
+        // Refresh display every 0.25 secs.
+        intervalID = window.setInterval(displayReadings, 250);
+    } else {
+        console.log('No magnetometer plugin!!');
+        console.log('cordova = ' + !!window.cordova);
+        console.log('cordova.plugins = ' + !!cordova.plugins);
+        console.log('cordova.plugins.magnetometer = ' + !!cordova.plugins.magnetometer);
+    }
+}
+
+function stop() {
+    console.log('stop()');
+    window.clearInterval(intervalID);
+    if (window.cordova && cordova.plugins && cordova.plugins.magnetometer)
+        cordova.plugins.magnetometer.stop();
+}
+
+function findSlope(values_y) {
+        var x_sum = 0;
+        var y_sum = 0;
+        var xy_sum = 0;
+        var xx_sum = 0;
+        var count = 0;
+
+        /*
+         * The above is just for quick access, makes the program faster
+         */
+        var x = 0;
+        var y = 0;
+        
+        var values_length = values_y.length;
+
+        /*
+         * Above and below cover edge cases
+         */
+        if (values_length === 0) {
+            return 0;
+        }
+
+        /*
+         * Calculate the sum for each of the parts necessary.
+         */
+
+        for (let i = 0; i< values_length; i++) {
+            x = i;
+            y = values_y[i];
+            x_sum+= x;
+            y_sum+= y;
+            xx_sum += x*x;
+            xy_sum += x*y;
+            count++;
+        }
+
+        /*
+         * Calculate m and b for the line equation:
+         * y = x * m + b
+         */
+        var m = (count*xy_sum - x_sum*y_sum) / (count*xx_sum - x_sum*x_sum);
+        return m;
+}
+                                                         
+// Device Event Listeners ___________________________________
+
+document.addEventListener("pause", stop, false);
+document.addEventListener("resume", watchMagnetometer, false);
+document.addEventListener("deviceready", watchMagnetometer, false)
+
+</script>
+  
+</body>
+</html>
