@@ -1,5 +1,4 @@
-cordova.define("cordova-plugin-magnetometer.main", function(require, exports, module) {
-var argscheck = require('cordova/argscheck'),
+cordova.define("cordova-plugin-magnetometer.main", function(require, exports, module) { var argscheck = require('cordova/argscheck'),
     utils = require('cordova/utils'),
     exec = require('cordova/exec'),
     timers = {};
